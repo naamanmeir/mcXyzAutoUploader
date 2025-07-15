@@ -1,0 +1,38 @@
+{
+    "name": "minecraft-screenshot-uploader",
+    "version": "1.0.0",
+    "description": "Minecraft Screenshot Auto-Uploader",
+    "main": "main.js",
+    "scripts": {
+        "start": "electron .",
+        "build": "electron-builder",
+        "dist": "electron-builder --publish=never",
+        "create-icon": "node create-icon.js"
+    },
+    "devDependencies": {
+        "electron": "latest",
+        "electron-builder": "latest"
+    },
+    "build": {
+        "appId": "com.mcxyz.screenshot-uploader",
+        "productName": "MC Screenshot Uploader",
+        "directories": {
+            "output": "dist"
+        },
+        "files": [
+            "**/*",
+            "!dist/**/*",
+            "!create-icon.js"
+        ],
+        "win": {
+            "target": "nsis",
+            "icon": "icon.ico"
+        },
+        "mac": {
+            "icon": "icon.icns"
+        },
+        "linux": {
+            "icon": "icon.png"
+        }
+    }
+}
