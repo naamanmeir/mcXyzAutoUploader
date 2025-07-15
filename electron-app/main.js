@@ -1,12 +1,12 @@
 const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const http = require('http');
+const https = require('https');
 const url = require('url');
 
 // Configuration
 const FOLDER_PATH = 'c:/Users/naaman/AppData/Roaming/.minecraft/screenshots';
-const REMOTE_UPLOAD_URL = 'http://flowflowxyz.niva.monster/upload';
+const REMOTE_UPLOAD_URL = 'https://flowflowxyz.niva.monster/upload';
 
 // Track previously seen files and watcher
 let previousFiles = new Set();
@@ -27,7 +27,7 @@ function createWindow() {
         },
         icon: path.join(__dirname, 'icon.ico'),
         autoHideMenuBar: true,
-        title: 'MC Screenshot Uploader'
+        title: 'Location Tracker Uploader'
     });
 
     mainWindow.loadFile('index.html');
@@ -62,7 +62,7 @@ function uploadFile(file, filePath, stats) {
         
         const options = {
             hostname: parsedUrl.hostname,
-            port: parsedUrl.port || 80,
+            port: parsedUrl.port || 443,
             path: parsedUrl.pathname,
             method: 'POST',
             headers: {
@@ -71,7 +71,7 @@ function uploadFile(file, filePath, stats) {
             }
         };
         
-        const req = http.request(options, (res) => {
+        const req = https.request(options, (res) => {
             let responseData = '';
             
             res.on('data', (chunk) => {
@@ -81,8 +81,9 @@ function uploadFile(file, filePath, stats) {
             res.on('end', () => {
                 if (res.statusCode >= 200 && res.statusCode < 300) {
                     sendToRenderer('upload-success', file);
+                    sendToRenderer('upload-response', `Response: ${responseData}`);
                 } else {
-                    sendToRenderer('upload-error', `Failed to upload ${file}: ${res.statusCode}`);
+                    sendToRenderer('upload-error', `Failed to upload ${file}: ${res.statusCode} - ${responseData}`);
                 }
             });
         });
@@ -91,7 +92,11 @@ function uploadFile(file, filePath, stats) {
             sendToRenderer('upload-error', `Upload error for ${file}: ${error.message}`);
         });
         
-        req.setTimeout(30000);
+        req.setTimeout(30000, () => {
+            req.abort();
+            sendToRenderer('upload-error', `Upload timeout for ${file}`);
+        });
+        
         req.write(jsonBody);
         req.end();
     });

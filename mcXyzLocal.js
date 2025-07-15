@@ -1,11 +1,11 @@
 const fs = require('fs');
 const path = require('path');
-const http = require('http');
+const https = require('https');
 const url = require('url');
 
 // Configuration
 const FOLDER_PATH = 'c:/Users/naaman/AppData/Roaming/.minecraft/screenshots'; // Change to your folder path
-const REMOTE_UPLOAD_URL = 'http://flowflowxyz.niva.monster/upload'; // Change to your server endpoint
+const REMOTE_UPLOAD_URL = 'https://flowflowxyz.niva.monster/upload'; // Change to your server endpoint
 
 // Track previously seen files and watcher
 let previousFiles = new Set();
@@ -15,7 +15,6 @@ let fileWatcher;
 function uploadFile(file, filePath, stats) {
     console.log(`[${new Date().toLocaleTimeString()}] Upload Start: Uploading: ${file}`);
     
-    // Read file as buffer for body
     fs.readFile(filePath, (readErr, fileBuffer) => {
         if (readErr) {
             console.log(`[${new Date().toLocaleTimeString()}] Upload Error: Error reading ${file}: ${readErr.message}`);
@@ -38,10 +37,10 @@ function uploadFile(file, filePath, stats) {
         const parsedUrl = url.parse(REMOTE_UPLOAD_URL);
         const jsonBody = JSON.stringify(requestBody);
         
-        // HTTP request options
+        // HTTPS request options
         const options = {
             hostname: parsedUrl.hostname,
-            port: parsedUrl.port || 80,
+            port: parsedUrl.port || 443,
             path: parsedUrl.pathname,
             method: 'POST',
             headers: {
@@ -50,8 +49,8 @@ function uploadFile(file, filePath, stats) {
             }
         };
         
-        // Create HTTP request
-        const req = http.request(options, (res) => {
+        // Create HTTPS request
+        const req = https.request(options, (res) => {
             let responseData = '';
             
             res.on('data', (chunk) => {
@@ -61,8 +60,9 @@ function uploadFile(file, filePath, stats) {
             res.on('end', () => {
                 if (res.statusCode >= 200 && res.statusCode < 300) {
                     console.log(`[${new Date().toLocaleTimeString()}] Upload Success: ${file}`);
+                    console.log(`[${new Date().toLocaleTimeString()}] Response: ${responseData}`);
                 } else {
-                    console.log(`[${new Date().toLocaleTimeString()}] Upload Error: Failed to upload ${file}: ${res.statusCode}`);
+                    console.log(`[${new Date().toLocaleTimeString()}] Upload Error: Failed to upload ${file}: ${res.statusCode} - ${responseData}`);
                 }
             });
         });
@@ -71,7 +71,11 @@ function uploadFile(file, filePath, stats) {
             console.log(`[${new Date().toLocaleTimeString()}] Upload Error: Upload error for ${file}: ${error.message}`);
         });
         
-        req.setTimeout(30000);
+        req.setTimeout(30000, () => {
+            req.abort();
+            console.log(`[${new Date().toLocaleTimeString()}] Upload Error: Upload timeout for ${file}`);
+        });
+        
         req.write(jsonBody);
         req.end();
     });
@@ -160,13 +164,13 @@ function getStatus() {
 }
 
 // Command line interface
-console.log('MC Screenshot Uploader - Local Version');
-console.log('=====================================');
+console.log('Location Tracker Uploader - Local Version');
+console.log('===========================================');
 console.log('Commands:');
-console.log('  start  - Start monitoring');
-console.log('  stop   - Stop monitoring');
-console.log('  status - Show current status');
-console.log('  quit   - Exit application');
+console.log('  s - Start monitoring');
+console.log('  p - Stop monitoring');
+console.log('  t - Show current status');
+console.log('  q - Quit application');
 console.log('');
 
 // Start monitoring automatically
@@ -180,25 +184,24 @@ process.stdin.on('readable', () => {
         const command = chunk.trim().toLowerCase();
         
         switch (command) {
-            case 'start':
+            case 's':
                 startMonitoring();
                 break;
-            case 'stop':
+            case 'p':
                 stopMonitoring();
                 break;
-            case 'status':
+            case 't':
                 const status = getStatus();
                 console.log(`Status: ${status.isMonitoring ? 'Monitoring' : 'Stopped'}`);
                 console.log(`Folder: ${status.folderPath}`);
                 console.log(`Upload URL: ${status.uploadUrl}`);
                 break;
-            case 'quit':
-            case 'exit':
+            case 'q':
                 stopMonitoring();
                 process.exit(0);
                 break;
             default:
-                console.log('Unknown command. Available: start, stop, status, quit');
+                console.log('Unknown command. Available: s, p, t, q');
         }
     }
 });
