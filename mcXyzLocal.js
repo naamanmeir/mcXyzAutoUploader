@@ -6,23 +6,19 @@ const url = require('url');
 // Configuration
 const FOLDER_PATH = 'c:/Users/naaman/AppData/Roaming/.minecraft/screenshots'; // Change to your folder path
 const REMOTE_UPLOAD_URL = 'http://flowflowxyz.niva.monster/upload'; // Change to your server endpoint
-const CHECK_INTERVAL = 5000; // 5 seconds
 
-// Track previously seen files
+// Track previously seen files and watcher
 let previousFiles = new Set();
-
-console.log('Starting continuous file monitoring...');
-console.log('Folder path:', FOLDER_PATH);
-console.log('Upload URL:', REMOTE_UPLOAD_URL);
-console.log(`Checking for new files every ${CHECK_INTERVAL / 1000} seconds`);
+let isMonitoring = false;
+let fileWatcher;
 
 function uploadFile(file, filePath, stats) {
-    console.log(`${file} is a new file, preparing for upload...`);
+    console.log(`[${new Date().toLocaleTimeString()}] Upload Start: Uploading: ${file}`);
     
     // Read file as buffer for body
     fs.readFile(filePath, (readErr, fileBuffer) => {
         if (readErr) {
-            console.error(`Error reading file buffer for ${file}:`, readErr);
+            console.log(`[${new Date().toLocaleTimeString()}] Upload Error: Error reading ${file}: ${readErr.message}`);
             return;
         }
         
@@ -39,17 +35,8 @@ function uploadFile(file, filePath, stats) {
             autoadd: 1
         };
         
-        console.log(`Request body created for: ${file}`);
-        console.log(`Sending POST request to upload ${file}...`);
-        console.log(`File size: ${stats.size} bytes`);
-        
-        // Parse the URL for http request
         const parsedUrl = url.parse(REMOTE_UPLOAD_URL);
-        console.log(`Parsed URL - Host: ${parsedUrl.hostname}, Port: ${parsedUrl.port}, Path: ${parsedUrl.pathname}`);
-        
-        // Prepare request body as JSON string
         const jsonBody = JSON.stringify(requestBody);
-        console.log(`JSON body prepared, length: ${jsonBody.length} bytes`);
         
         // HTTP request options
         const options = {
@@ -63,112 +50,167 @@ function uploadFile(file, filePath, stats) {
             }
         };
         
-        console.log(`HTTP request options configured for ${file}`);
-        console.log(`Request headers:`, options.headers);
-        
         // Create HTTP request
         const req = http.request(options, (res) => {
-            console.log(`Response status for ${file}: ${res.statusCode}`);
-            console.log(`Response headers for ${file}:`, res.headers);
-            
             let responseData = '';
             
             res.on('data', (chunk) => {
                 responseData += chunk;
-                console.log(`Received data chunk for ${file}, size: ${chunk.length} bytes`);
             });
             
             res.on('end', () => {
-                console.log(`Response completed for ${file}`);
-                console.log(`Full response data for ${file}:`, responseData);
-                
                 if (res.statusCode >= 200 && res.statusCode < 300) {
-                    console.log(`✅ Successfully uploaded ${file}: ${res.statusCode}`);
-                    try {
-                        const parsedResponse = JSON.parse(responseData);
-                        console.log(`Parsed response data for ${file}:`, parsedResponse);
-                    } catch (parseErr) {
-                        console.log(`Response is not JSON for ${file}:`, responseData);
-                    }
+                    console.log(`[${new Date().toLocaleTimeString()}] Upload Success: ${file}`);
                 } else {
-                    console.error(`❌ Failed to upload ${file}: ${res.statusCode}`);
-                    console.error(`Error response for ${file}:`, responseData);
+                    console.log(`[${new Date().toLocaleTimeString()}] Upload Error: Failed to upload ${file}: ${res.statusCode}`);
                 }
             });
         });
         
         req.on('error', (error) => {
-            console.error(`❌ Request error for ${file}:`, error.message);
-            console.error(`Error code: ${error.code}`);
-            console.error(`File details - Name: ${file}, Size: ${stats.size} bytes, Path: ${filePath}`);
+            console.log(`[${new Date().toLocaleTimeString()}] Upload Error: Upload error for ${file}: ${error.message}`);
         });
         
-        req.on('timeout', () => {
-            console.error(`❌ Request timeout for ${file}`);
-            req.destroy();
-        });
-        
-        // Set timeout
         req.setTimeout(30000);
-        
-        console.log(`Writing request body for ${file}...`);
-        // Write the JSON body to the request
         req.write(jsonBody);
-        console.log(`Request body written for ${file}, ending request...`);
         req.end();
     });
 }
 
 function checkForNewFiles() {
-    console.log(`[${new Date().toLocaleTimeString()}] Checking for new files...`);
-    
     fs.readdir(FOLDER_PATH, (err, files) => {
         if (err) {
-            console.error('Error reading folder:', err);
+            console.log(`[${new Date().toLocaleTimeString()}] Folder Error: Error reading folder: ${err.message}`);
             return;
         }
 
         const currentFiles = new Set();
-        let newFileCount = 0;
+        const newFiles = [];
 
         files.forEach(file => {
             const filePath = path.join(FOLDER_PATH, file);
             
             fs.stat(filePath, (err, stats) => {
-                if (err) {
-                    console.error(`Error reading file stats for ${file}:`, err);
-                    return;
-                }
+                if (err) return;
                 
                 if (stats.isFile()) {
                     currentFiles.add(file);
                     
                     // Check if this is a new file
                     if (!previousFiles.has(file)) {
-                        console.log(`📁 New file detected: ${file}`);
-                        newFileCount++;
-                        uploadFile(file, filePath, stats);
+                        newFiles.push({ file, filePath, stats });
                     }
                 }
             });
         });
 
-        // Update the previous files list
         setTimeout(() => {
-            previousFiles = currentFiles;
-            if (newFileCount === 0) {
-                console.log(`[${new Date().toLocaleTimeString()}] No new files found`);
-            } else {
-                console.log(`[${new Date().toLocaleTimeString()}] Found ${newFileCount} new files`);
+            if (newFiles.length > 0) {
+                console.log(`[${new Date().toLocaleTimeString()}] New Files Detected: ${newFiles.length} new file(s)`);
+                newFiles.forEach(({ file, filePath, stats }) => {
+                    uploadFile(file, filePath, stats);
+                });
             }
-        }, 1000); // Small delay to ensure all stat operations complete
+            previousFiles = currentFiles;
+        }, 100);
     });
 }
 
-// Initial scan
-checkForNewFiles();
+function startMonitoring() {
+    if (isMonitoring) return;
+    
+    isMonitoring = true;
+    console.log(`[${new Date().toLocaleTimeString()}] Monitoring Started`);
+    console.log(`Watching folder: ${FOLDER_PATH}`);
+    console.log(`Upload URL: ${REMOTE_UPLOAD_URL}`);
+    
+    // Initial scan
+    checkForNewFiles();
+    
+    // Watch for file system changes
+    try {
+        fileWatcher = fs.watch(FOLDER_PATH, { persistent: true }, (eventType, filename) => {
+            if (eventType === 'rename' && filename) {
+                // Small delay to ensure file is fully written
+                setTimeout(() => checkForNewFiles(), 500);
+            }
+        });
+    } catch (error) {
+        console.log(`[${new Date().toLocaleTimeString()}] Folder Error: Error watching folder: ${error.message}`);
+    }
+}
 
-// Set up continuous monitoring
-setInterval(checkForNewFiles, CHECK_INTERVAL);
+function stopMonitoring() {
+    if (!isMonitoring) return;
+    
+    isMonitoring = false;
+    if (fileWatcher) {
+        fileWatcher.close();
+        fileWatcher = null;
+    }
+    console.log(`[${new Date().toLocaleTimeString()}] Monitoring Stopped`);
+}
 
-console.log('File monitor is running. Press Ctrl+C to stop.');
+function getStatus() {
+    return {
+        isMonitoring,
+        folderPath: FOLDER_PATH,
+        uploadUrl: REMOTE_UPLOAD_URL
+    };
+}
+
+// Command line interface
+console.log('MC Screenshot Uploader - Local Version');
+console.log('=====================================');
+console.log('Commands:');
+console.log('  start  - Start monitoring');
+console.log('  stop   - Stop monitoring');
+console.log('  status - Show current status');
+console.log('  quit   - Exit application');
+console.log('');
+
+// Start monitoring automatically
+startMonitoring();
+
+// Handle command line input
+process.stdin.setEncoding('utf8');
+process.stdin.on('readable', () => {
+    let chunk;
+    while ((chunk = process.stdin.read()) !== null) {
+        const command = chunk.trim().toLowerCase();
+        
+        switch (command) {
+            case 'start':
+                startMonitoring();
+                break;
+            case 'stop':
+                stopMonitoring();
+                break;
+            case 'status':
+                const status = getStatus();
+                console.log(`Status: ${status.isMonitoring ? 'Monitoring' : 'Stopped'}`);
+                console.log(`Folder: ${status.folderPath}`);
+                console.log(`Upload URL: ${status.uploadUrl}`);
+                break;
+            case 'quit':
+            case 'exit':
+                stopMonitoring();
+                process.exit(0);
+                break;
+            default:
+                console.log('Unknown command. Available: start, stop, status, quit');
+        }
+    }
+});
+
+// Handle process termination
+process.on('SIGINT', () => {
+    console.log('\nShutting down...');
+    stopMonitoring();
+    process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+    stopMonitoring();
+    process.exit(0);
+});
