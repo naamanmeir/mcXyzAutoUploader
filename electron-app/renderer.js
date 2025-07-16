@@ -24,7 +24,8 @@ async function init() {
 
 function updateConfig(status) {
     folderPath.textContent = status.folderPath;
-    uploadUrl.textContent = status.uploadUrl;
+    uploadUrl.value = status.uploadUrl;
+    uploadUrl.setAttribute('readonly', 'readonly');
     updateMonitoringStatus(status.isMonitoring);
 }
 
@@ -123,20 +124,36 @@ changeFolderBtn.addEventListener('click', async () => {
     }
 });
 
-changeServerBtn.addEventListener('click', async () => {
-    const currentUrl = uploadUrl.textContent;
-    const newUrl = prompt('Enter the new server URL:', currentUrl);
+changeServerBtn.addEventListener('click', () => {
+    uploadUrl.removeAttribute('readonly');
+    uploadUrl.focus();
+    uploadUrl.select();
+});
 
-    if (newUrl && newUrl !== currentUrl) {
+uploadUrl.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+        await saveServerUrl();
+    }
+});
+uploadUrl.addEventListener('blur', async () => {
+    await saveServerUrl();
+});
+
+async function saveServerUrl() {
+    const newUrl = uploadUrl.value.trim();
+    if (newUrl && (newUrl.startsWith('http://') || newUrl.startsWith('https://'))) {
         const result = await ipcRenderer.invoke('set-server-url', newUrl);
         if (result) {
-            uploadUrl.textContent = result;
+            uploadUrl.value = result;
             addActivityItem('info', `Server URL changed to: ${result}`);
         } else {
             addActivityItem('upload-error', 'Invalid server URL provided. Must start with http:// or https://');
         }
+    } else {
+        addActivityItem('upload-error', 'Invalid server URL provided. Must start with http:// or https://');
     }
-});
+    uploadUrl.setAttribute('readonly', 'readonly');
+}
 
 // Listen for app events
 ipcRenderer.on('app-event', (event, { type, data }) => {
