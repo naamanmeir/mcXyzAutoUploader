@@ -1,12 +1,19 @@
-const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const url = require('url');
 
 // Configuration
-const FOLDER_PATH = 'c:/Users/naaman/AppData/Roaming/.minecraft/screenshots';
-const REMOTE_UPLOAD_URL = 'https://flowflowxyz.niva.monster/upload';
+const DEFAULT_FOLDER_PATH = 'c:/Users/naaman/AppData/Roaming/.minecraft/screenshots';
+const UPLOADED_FILES_PATH = path.join(app.getPath('userData'), 'uploaded-files.json');
+const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json');
+
+// App configuration
+let config = {
+    folderPath: DEFAULT_FOLDER_PATH,
+    remoteUploadUrl: 'https://flowflowxyz.niva.monster/upload'
+};
 
 // Track previously seen files and watcher
 let previousFiles = new Set();
@@ -14,10 +21,58 @@ let mainWindow;
 let isMonitoring = false;
 let fileWatcher;
 
+function loadConfig() {
+    try {
+        if (fs.existsSync(CONFIG_PATH)) {
+            const data = fs.readFileSync(CONFIG_PATH, 'utf8');
+            const savedConfig = JSON.parse(data);
+            config = { ...config, ...savedConfig }; // Merge defaults with saved config
+        }
+        saveConfig(); // Save back to ensure new properties are added to the file
+    } catch (error) {
+        console.error('Error loading config, using defaults:', error);
+    }
+}
+
+function saveConfig() {
+    try {
+        fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+    } catch (error) {
+        console.error('Error saving config:', error);
+    }
+}
+
+function loadUploadedFiles() {
+    try {
+        if (fs.existsSync(UPLOADED_FILES_PATH)) {
+            const data = fs.readFileSync(UPLOADED_FILES_PATH, 'utf8');
+            const uploaded = JSON.parse(data);
+            previousFiles = new Set(uploaded);
+        } else {
+            fs.writeFileSync(UPLOADED_FILES_PATH, JSON.stringify([]));
+            previousFiles = new Set();
+        }
+    } catch (error) {
+        sendToRenderer('upload-error', `Error loading uploaded files list: ${error.message}`);
+        previousFiles = new Set();
+    }
+}
+
+function saveUploadedFile(fileName) {
+    previousFiles.add(fileName);
+    try {
+        fs.writeFileSync(UPLOADED_FILES_PATH, JSON.stringify(Array.from(previousFiles)));
+    } catch (error) {
+        sendToRenderer('upload-error', `Error saving uploaded files list: ${error.message}`);
+    }
+}
+
 function createWindow() {
     // Hide menu
     Menu.setApplicationMenu(null);
     
+    loadConfig();
+
     mainWindow = new BrowserWindow({
         width: 800,
         height: 600,
@@ -32,6 +87,7 @@ function createWindow() {
 
     mainWindow.loadFile('index.html');
     
+    loadUploadedFiles();
     // Start monitoring automatically
     startMonitoring();
 }
@@ -57,7 +113,7 @@ function uploadFile(file, filePath, stats) {
             autoadd: 1
         };
         
-        const parsedUrl = url.parse(REMOTE_UPLOAD_URL);
+        const parsedUrl = url.parse(config.remoteUploadUrl);
         const jsonBody = JSON.stringify(requestBody);
         
         const options = {
@@ -80,6 +136,7 @@ function uploadFile(file, filePath, stats) {
             
             res.on('end', () => {
                 if (res.statusCode >= 200 && res.statusCode < 300) {
+                    saveUploadedFile(file);
                     sendToRenderer('upload-success', file);
                     sendToRenderer('upload-response', `Response: ${responseData}`);
                 } else {
@@ -103,7 +160,7 @@ function uploadFile(file, filePath, stats) {
 }
 
 function checkForNewFiles() {
-    fs.readdir(FOLDER_PATH, (err, files) => {
+    fs.readdir(config.folderPath, (err, files) => {
         if (err) {
             sendToRenderer('folder-error', `Error reading folder: ${err.message}`);
             return;
@@ -113,7 +170,7 @@ function checkForNewFiles() {
         const newFiles = [];
 
         files.forEach(file => {
-            const filePath = path.join(FOLDER_PATH, file);
+            const filePath = path.join(config.folderPath, file);
             
             fs.stat(filePath, (err, stats) => {
                 if (err) return;
@@ -151,7 +208,7 @@ function startMonitoring() {
     
     // Watch for file system changes
     try {
-        fileWatcher = fs.watch(FOLDER_PATH, { persistent: true }, (eventType, filename) => {
+        fileWatcher = fs.watch(config.folderPath, { persistent: true }, (eventType, filename) => {
             if (eventType === 'rename' && filename) {
                 // Small delay to ensure file is fully written
                 setTimeout(() => checkForNewFiles(), 500);
@@ -193,9 +250,36 @@ ipcMain.handle('stop-monitoring', () => {
 ipcMain.handle('get-status', () => {
     return {
         isMonitoring,
-        folderPath: FOLDER_PATH,
-        uploadUrl: REMOTE_UPLOAD_URL
+        folderPath: config.folderPath,
+        uploadUrl: config.remoteUploadUrl
     };
+});
+
+ipcMain.handle('change-folder', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openDirectory']
+    });
+
+    if (!canceled && filePaths.length > 0) {
+        const newPath = filePaths[0];
+        stopMonitoring();
+        config.folderPath = newPath;
+        saveConfig();
+        startMonitoring();
+        return newPath;
+    }
+    return null;
+});
+
+ipcMain.handle('set-server-url', async (event, newUrl) => {
+    if (newUrl && (newUrl.startsWith('http://') || newUrl.startsWith('https://'))) {
+        stopMonitoring();
+        config.remoteUploadUrl = newUrl;
+        saveConfig();
+        startMonitoring();
+        return newUrl;
+    }
+    return null;
 });
 
 app.whenReady().then(createWindow);

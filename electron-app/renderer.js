@@ -10,6 +10,8 @@ const startBtn = document.getElementById('start-btn');
 const stopBtn = document.getElementById('stop-btn');
 const clearFeedBtn = document.getElementById('clear-feed');
 const activityFeed = document.getElementById('activity-feed');
+const changeFolderBtn = document.getElementById('change-folder-btn');
+const changeServerBtn = document.getElementById('change-server-btn');
 
 let isMonitoring = false;
 let uploadsInProgress = 0;
@@ -58,6 +60,9 @@ function addActivityItem(type, message, data = null) {
     let content = '';
     
     switch (type) {
+        case 'info':
+            content = `<strong>ℹ️ Info:</strong> ${message}<br><small>${timestamp}</small>`;
+            break;
         case 'new-files':
             content = `<strong>${data} new file(s) detected</strong><br><small>${timestamp}</small>`;
             break;
@@ -108,6 +113,29 @@ stopBtn.addEventListener('click', async () => {
 
 clearFeedBtn.addEventListener('click', () => {
     activityFeed.innerHTML = '';
+});
+
+changeFolderBtn.addEventListener('click', async () => {
+    const newPath = await ipcRenderer.invoke('change-folder');
+    if (newPath) {
+        folderPath.textContent = newPath;
+        addActivityItem('info', `Monitoring folder changed to: ${newPath}`);
+    }
+});
+
+changeServerBtn.addEventListener('click', async () => {
+    const currentUrl = uploadUrl.textContent;
+    const newUrl = prompt('Enter the new server URL:', currentUrl);
+
+    if (newUrl && newUrl !== currentUrl) {
+        const result = await ipcRenderer.invoke('set-server-url', newUrl);
+        if (result) {
+            uploadUrl.textContent = result;
+            addActivityItem('info', `Server URL changed to: ${result}`);
+        } else {
+            addActivityItem('upload-error', 'Invalid server URL provided. Must start with http:// or https://');
+        }
+    }
 });
 
 // Listen for app events

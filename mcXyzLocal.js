@@ -4,13 +4,57 @@ const https = require('https');
 const url = require('url');
 
 // Configuration
-const FOLDER_PATH = 'c:/Users/naaman/AppData/Roaming/.minecraft/screenshots'; // Change to your folder path
-const REMOTE_UPLOAD_URL = 'https://flowflowxyz.niva.monster/upload'; // Change to your server endpoint
+const UPLOADED_FILES_PATH = path.join(__dirname, 'uploaded-files.json');
+const CONFIG_PATH = path.join(__dirname, 'config.json');
+
+let config = {
+    folderPath: 'c:/Users/naaman/AppData/Roaming/.minecraft/screenshots',
+    remoteUploadUrl: 'https://flowflowxyz.niva.monster/upload'
+};
 
 // Track previously seen files and watcher
 let previousFiles = new Set();
 let isMonitoring = false;
 let fileWatcher;
+
+function loadConfig() {
+    try {
+        if (fs.existsSync(CONFIG_PATH)) {
+            const data = fs.readFileSync(CONFIG_PATH, 'utf8');
+            const savedConfig = JSON.parse(data);
+            config = { ...config, ...savedConfig };
+        } else {
+            fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+        }
+    } catch (error) {
+        console.log(`[${new Date().toLocaleTimeString()}] Error loading config, using defaults: ${error.message}`);
+    }
+}
+
+function loadUploadedFiles() {
+    try {
+        if (fs.existsSync(UPLOADED_FILES_PATH)) {
+            const data = fs.readFileSync(UPLOADED_FILES_PATH, 'utf8');
+            const uploaded = JSON.parse(data);
+            previousFiles = new Set(uploaded);
+        } else {
+            fs.writeFileSync(UPLOADED_FILES_PATH, JSON.stringify([]));
+            previousFiles = new Set();
+        }
+    } catch (error) {
+        console.log(`[${new Date().toLocaleTimeString()}] Error loading uploaded files list: ${error.message}`);
+        previousFiles = new Set();
+    }
+}
+
+function saveUploadedFile(fileName) {
+    previousFiles.add(fileName);
+    try {
+        fs.writeFileSync(UPLOADED_FILES_PATH, JSON.stringify(Array.from(previousFiles)));
+    } catch (error) {
+        console.log(`[${new Date().toLocaleTimeString()}] Error saving uploaded files list: ${error.message}`);
+    }
+}
 
 function uploadFile(file, filePath, stats) {
     console.log(`[${new Date().toLocaleTimeString()}] Upload Start: Uploading: ${file}`);
@@ -34,7 +78,7 @@ function uploadFile(file, filePath, stats) {
             autoadd: 1
         };
         
-        const parsedUrl = url.parse(REMOTE_UPLOAD_URL);
+        const parsedUrl = url.parse(config.remoteUploadUrl);
         const jsonBody = JSON.stringify(requestBody);
         
         // HTTPS request options
@@ -59,6 +103,7 @@ function uploadFile(file, filePath, stats) {
             
             res.on('end', () => {
                 if (res.statusCode >= 200 && res.statusCode < 300) {
+                    saveUploadedFile(file);
                     console.log(`[${new Date().toLocaleTimeString()}] Upload Success: ${file}`);
                     console.log(`[${new Date().toLocaleTimeString()}] Response: ${responseData}`);
                 } else {
@@ -82,7 +127,7 @@ function uploadFile(file, filePath, stats) {
 }
 
 function checkForNewFiles() {
-    fs.readdir(FOLDER_PATH, (err, files) => {
+    fs.readdir(config.folderPath, (err, files) => {
         if (err) {
             console.log(`[${new Date().toLocaleTimeString()}] Folder Error: Error reading folder: ${err.message}`);
             return;
@@ -92,7 +137,7 @@ function checkForNewFiles() {
         const newFiles = [];
 
         files.forEach(file => {
-            const filePath = path.join(FOLDER_PATH, file);
+            const filePath = path.join(config.folderPath, file);
             
             fs.stat(filePath, (err, stats) => {
                 if (err) return;
@@ -125,15 +170,15 @@ function startMonitoring() {
     
     isMonitoring = true;
     console.log(`[${new Date().toLocaleTimeString()}] Monitoring Started`);
-    console.log(`Watching folder: ${FOLDER_PATH}`);
-    console.log(`Upload URL: ${REMOTE_UPLOAD_URL}`);
+    console.log(`Watching folder: ${config.folderPath}`);
+    console.log(`Upload URL: ${config.remoteUploadUrl}`);
     
     // Initial scan
     checkForNewFiles();
     
     // Watch for file system changes
     try {
-        fileWatcher = fs.watch(FOLDER_PATH, { persistent: true }, (eventType, filename) => {
+        fileWatcher = fs.watch(config.folderPath, { persistent: true }, (eventType, filename) => {
             if (eventType === 'rename' && filename) {
                 // Small delay to ensure file is fully written
                 setTimeout(() => checkForNewFiles(), 500);
@@ -158,14 +203,17 @@ function stopMonitoring() {
 function getStatus() {
     return {
         isMonitoring,
-        folderPath: FOLDER_PATH,
-        uploadUrl: REMOTE_UPLOAD_URL
+        folderPath: config.folderPath,
+        uploadUrl: config.remoteUploadUrl
     };
 }
 
 // Command line interface
 console.log('Location Tracker Uploader - Local Version');
 console.log('===========================================');
+console.log('To change settings, edit the config.json file in this directory.');
+console.log('Example: "folderPath": "C:\\\\Users\\\\YourUser\\\\Pictures\\\\MyFolder"');
+console.log('Note: Use double backslashes (\\\\) for paths in JSON.');
 console.log('Commands:');
 console.log('  s - Start monitoring');
 console.log('  p - Stop monitoring');
@@ -174,6 +222,8 @@ console.log('  q - Quit application');
 console.log('');
 
 // Start monitoring automatically
+loadConfig();
+loadUploadedFiles();
 startMonitoring();
 
 // Handle command line input
